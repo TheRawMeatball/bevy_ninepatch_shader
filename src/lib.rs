@@ -1,6 +1,6 @@
 use bevy_app::Plugin;
 use bevy_asset::{AddAsset, Assets, Handle, HandleUntyped};
-use bevy_ecs::{Bundle, Resources};
+use bevy_ecs::prelude::Bundle;
 use bevy_math::{Vec2, Vec4};
 use bevy_reflect::TypeUuid;
 use bevy_render::{
@@ -21,9 +21,34 @@ impl Plugin for NinepatchUIShaderPlugin {
     fn build(&self, app: &mut bevy_app::AppBuilder) {
         app.add_asset::<NinepatchMaterial>();
 
-        let resources = app.resources();
-        let mut render_graph = resources.get_mut::<RenderGraph>().unwrap();
-        render_graph.add_ui_graph(resources);
+        let world = app.world_mut().cell();
+        let mut render_graph = world.get_resource_mut::<RenderGraph>().unwrap();
+        let mut pipelines = world
+            .get_resource_mut::<Assets<PipelineDescriptor>>()
+            .unwrap();
+        let mut shaders = world.get_resource_mut::<Assets<Shader>>().unwrap();
+        // Create a new shader pipeline
+        let pipeline_handle = PipelineDescriptor::default_config(ShaderStages {
+            vertex: shaders.add(Shader::from_glsl(
+                ShaderStage::Vertex,
+                include_str!("ui.vert"),
+            )),
+            fragment: Some(shaders.add(Shader::from_glsl(
+                ShaderStage::Fragment,
+                include_str!("ui.frag"),
+            ))),
+        });
+
+        pipelines.set_untracked(NINEPATCH_PIPELINE_HANDLE, pipeline_handle);
+
+        render_graph.add_system_node(
+            NINEPATCH_MATERIAL,
+            AssetRenderResourcesNode::<NinepatchMaterial>::new(true),
+        );
+
+        render_graph
+            .add_node_edge(NINEPATCH_MATERIAL, bevy_ui::node::UI_PASS)
+            .unwrap();
     }
 }
 
@@ -40,7 +65,7 @@ pub struct NinepatchMaterial {
 pub struct NinepatchBundle {
     pub node: Node,
     pub style: Style,
-    pub mesh: Handle<Mesh>, // TODO: maybe abstract this out
+    pub mesh: Handle<Mesh>,
     pub material: Handle<NinepatchMaterial>,
     pub draw: Draw,
     pub visible: Visible,
@@ -73,38 +98,4 @@ impl Default for NinepatchBundle {
 pub const NINEPATCH_PIPELINE_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(PipelineDescriptor::TYPE_UUID, 2122239601228667733);
 
-pub mod node {
-    pub const NINEPATCH_MATERIAL: &str = "ninepatch";
-}
-
-mod imports {
-    // These can't be accessed regularly, so they're hacked in
-    pub mod node {
-        pub const UI_PASS: &str = "ui_pass";
-    }
-
-    pub use bevy_ui::camera;
-}
-
-pub trait UiRenderGraphBuilder {
-    fn add_ui_graph(&mut self, resources: &Resources) -> &mut Self;
-}
-
-impl UiRenderGraphBuilder for RenderGraph {
-    fn add_ui_graph(&mut self, resources: &Resources) -> &mut Self {
-        let mut pipelines = resources.get_mut::<Assets<PipelineDescriptor>>().unwrap();
-        let mut shaders = resources.get_mut::<Assets<Shader>>().unwrap();
-        pipelines.set_untracked(NINEPATCH_PIPELINE_HANDLE, PipelineDescriptor::default_config(ShaderStages {
-            vertex: shaders.add(Shader::from_glsl(ShaderStage::Vertex, include_str!("ui.vert"))),
-            fragment: Some(shaders.add(Shader::from_glsl(ShaderStage::Fragment, include_str!("ui.frag")))),
-        }));
-
-        self.add_system_node(
-            node::NINEPATCH_MATERIAL,
-            AssetRenderResourcesNode::<NinepatchMaterial>::new(true),
-        );
-        self.add_node_edge(node::NINEPATCH_MATERIAL, imports::node::UI_PASS)
-            .unwrap();
-        self
-    }
-}
+pub const NINEPATCH_MATERIAL: &str = "ninepatch";
